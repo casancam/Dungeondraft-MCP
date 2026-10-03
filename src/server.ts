@@ -42,6 +42,14 @@ type Json = Record<string, unknown>;
 const ok = (data: Json) => ({ content: [{ type: 'text' as const, text: JSON.stringify(data, null, 1) }] });
 const fail = (e: unknown) => ({ isError: true, content: [{ type: 'text' as const, text: `Error: ${(e as Error).message}` }] });
 
+function packageVersion(): string {
+  try {
+    return JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+  } catch {
+    return '0.0.0';
+  }
+}
+
 function handler<A>(fn: (args: A) => Json | Promise<Json>) {
   return async (args: A) => {
     try {
@@ -55,7 +63,7 @@ function handler<A>(fn: (args: A) => Json | Promise<Json>) {
 export function createServer(config: Config) {
   const sandbox = new Sandbox(config.roots, [config.installDir, ...config.assetDirs].filter((x): x is string => Boolean(x)));
   const catalog = new AssetCatalog({ installDir: config.installDir, assetDirs: config.assetDirs });
-  const server = new McpServer({ name: 'dungeondraft-mcp', version: '0.1.0' });
+  const server = new McpServer({ name: 'dungeondraft-mcp', version: packageVersion() });
 
   const edit = (file: string, dry: boolean | undefined, apply: (ed: MapEditor) => Json): Json => {
     const ed = new MapEditor(sandbox.resolve(file), catalog);
@@ -379,13 +387,26 @@ export function createServer(config: Config) {
     'set-terrain',
     {
       title: 'Set or paint terrain',
-      description: `Change a level's terrain: assign textures to slots 1-8 (list-assets category terrain), fill the whole level with one slot, and/or paint rectangles with a slot (hard edges, 1/4-square resolution). Slots 5-8 enable Dungeondraft's expanded slots. ${COORDS} ${CLOSE_MAP}`,
+      description: `Change a level's terrain: assign textures to slots 1-8 (list-assets category terrain), fill the whole level with one slot, and/or paint strokes. Each stroke is an area (rectangle), circle or line (polyline with a width, for trails/roads) painted with a slot; "feather" (squares) softens the edge and "strength" (0-1) blends partially. Resolution is 1/4 square. Strokes apply in order. Slots 5-8 enable Dungeondraft's expanded slots. Floor patterns hide terrain under them. ${COORDS} ${CLOSE_MAP}`,
       inputSchema: {
         path: mapPath,
         level: levelRef,
         slots: z.record(z.string()).optional().describe('e.g. {"1": "res://textures/terrain/terrain_sand.png"}'),
         fill: z.number().int().min(1).max(8).optional(),
-        paint: z.array(z.object({ area: rect, slot: z.number().int().min(1).max(8) })).optional(),
+        paint: z
+          .array(
+            z.object({
+              slot: z.number().int().min(1).max(8),
+              area: rect.optional(),
+              circle: z.object({ center: point, radius: z.number().positive() }).optional(),
+              line: z.object({ points: z.array(point).min(2), width: z.number().positive() }).optional(),
+              feather: z.number().min(0).max(20).optional().describe('Soft edge width in squares (default 0)'),
+              strength: z.number().min(0).max(1).optional().describe('Blend amount (default 1)'),
+            }),
+          )
+          .max(200)
+          .optional()
+          .describe('Give exactly one of area, circle or line per stroke'),
         enabled: z.boolean().optional(),
         smooth_blending: z.boolean().optional(),
         dry_run: dryRun,

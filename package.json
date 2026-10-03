@@ -1,14 +1,31 @@
 {
   "name": "dungeondraft-mcp",
   "version": "0.1.0",
-  "description": "MCP server that reads, edits and exports Dungeondraft maps, and converts Universal VTT exports into Foundry VTT scenes",
+  "description": "MCP server for Dungeondraft: read, edit and export .dungeondraft_map files, and convert Universal VTT (.dd2vtt) exports into Foundry VTT scenes",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "dungeondraft",
+    "battlemap",
+    "foundry-vtt",
+    "uvtt",
+    "dd2vtt",
+    "dnd",
+    "ttrpg",
+    "claude"
+  ],
+  "author": "Carlos Sanchez",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "dungeondraft-mcp": "dist/index.js"
   },
   "main": "dist/index.js",
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE",
+    "docs"
   ],
   "engines": {
     "node": ">=20"
@@ -19,7 +36,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "fixtures": "node scripts/fetch-fixtures.mjs"
+    "fixtures": "node scripts/fetch-fixtures.mjs",
+    "prepublishOnly": "npm run build && npm test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.0",
@@ -29,6 +47,5 @@
     "@types/node": "^20.19.0",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"
-  },
-  "license": "MIT"
+  }
 }

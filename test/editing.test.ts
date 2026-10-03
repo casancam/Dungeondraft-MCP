@@ -12,6 +12,7 @@ import {
   addWalls,
   buildRooms,
   listElements,
+  paintStroke,
   removeElements,
   setEnvironment,
   setTerrain,
@@ -149,7 +150,72 @@ describe('editing the user map (mcp_test, Dungeondraft 1.2.0.1)', () => {
   it('warns when painted terrain is hidden under floor patterns (the user map is covered by them)', () => {
     const { ed } = editOnCopy();
     setTerrain(ed, undefined, { paint: [{ area: { x: 22, y: 2, width: 6, height: 4 }, slot: 3 }] });
-    expect(ed.warnings.join('\n')).toMatch(/Floor patterns cover the area at \(22,2\).*19 \(tilesets\/simple\/tileset_cobble\.png\)/s);
+    expect(ed.warnings.join('\n')).toMatch(/Floor patterns cover 6x4 area at \(22,2\).*19 \(tilesets\/simple\/tileset_cobble\.png\)/s);
+  });
+
+  it('paints a circle and a line stroke through setTerrain', () => {
+    const { file, ed } = editOnCopy();
+    setTerrain(ed, undefined, {
+      fill: 1,
+      paint: [
+        { slot: 3, circle: { center: [10, 10], radius: 2 } },
+        { slot: 4, line: { points: [[20, 2], [30, 2]], width: 1 } },
+      ],
+    });
+    ed.commit(false);
+    const { map } = loadMap(file);
+    const s = parseByteArray(map.world.levels['0'].terrain.splat);
+    const w = map.world.width * 4;
+    const at = (gx: number, gy: number) => Array.from(s.slice((Math.floor(gy * 4) * w + Math.floor(gx * 4)) * 4, (Math.floor(gy * 4) * w + Math.floor(gx * 4)) * 4 + 4));
+    expect(at(10, 10)).toEqual([0, 0, 255, 0]); // circle centre
+    expect(at(11.5, 10)).toEqual([0, 0, 255, 0]); // inside radius
+    expect(at(12.6, 10)).toEqual([255, 0, 0, 0]); // outside radius
+    expect(at(25, 2)).toEqual([0, 0, 0, 255]); // on the line
+    expect(at(25, 2.4)).toEqual([0, 0, 0, 255]); // within half-width
+    expect(at(25, 3.1)).toEqual([255, 0, 0, 0]); // beyond half-width
+  });
+});
+
+describe('terrain brush', () => {
+  const W = 40; // 10 squares wide
+  const H = 8;
+  const fresh = () => {
+    const s = new Uint8Array(W * H * 4);
+    for (let i = 0; i < s.length; i += 4) s[i] = 255; // all slot 1
+    return s;
+  };
+  const texel = (s: Uint8Array, x: number, y: number) => Array.from(s.slice((y * W + x) * 4, (y * W + x) * 4 + 4));
+
+  it('feathered edges fall off smoothly and keep weights summing to ~255', () => {
+    const s = fresh();
+    paintStroke(s, null, W, H, { slot: 2, area: { x: 0, y: 0, width: 4, height: 2 }, feather: 2 });
+    expect(texel(s, 2, 2)).toEqual([0, 255, 0, 0]); // inside
+    const g = [16, 17, 18, 19, 20, 21, 22, 23, 24].map((x) => texel(s, x, 2)[1]); // moving right from the edge (x=4 squares)
+    for (let i = 1; i < g.length; i++) expect(g[i]).toBeLessThanOrEqual(g[i - 1]);
+    expect(g[0]).toBeGreaterThan(200);
+    expect(g[g.length - 1]).toBe(0); // 2 squares out
+    for (let i = 0; i < s.length; i += 4) expect(Math.abs(s[i] + s[i + 1] + s[i + 2] + s[i + 3] - 255)).toBeLessThanOrEqual(2);
+  });
+
+  it('strength blends partially', () => {
+    const s = fresh();
+    paintStroke(s, null, W, H, { slot: 3, area: { x: 0, y: 0, width: 1, height: 1 }, strength: 0.25 });
+    expect(texel(s, 0, 0)).toEqual([191, 0, 64, 0]);
+  });
+
+  it('blends across splat2 when slots 5-8 are in use', () => {
+    const s = fresh();
+    const s2 = new Uint8Array(W * H * 4);
+    paintStroke(s, s2, W, H, { slot: 6, circle: { center: [1, 1], radius: 0.5 } });
+    expect(texel(s, 4, 4)).toEqual([0, 0, 0, 0]);
+    expect(texel(s2, 4, 4)).toEqual([0, 255, 0, 0]);
+    paintStroke(s, s2, W, H, { slot: 1, area: { x: 0, y: 0, width: 2, height: 2 }, strength: 0.5 });
+    expect(texel(s, 4, 4)[0] + texel(s2, 4, 4)[1]).toBe(255);
+  });
+
+  it('needs exactly one shape', () => {
+    expect(() => paintStroke(fresh(), null, W, H, { slot: 1 })).toThrow(/exactly one/);
+    expect(() => paintStroke(fresh(), null, W, H, { slot: 1, area: { x: 0, y: 0, width: 1, height: 1 }, circle: { center: [0, 0], radius: 1 } })).toThrow(/exactly one/);
   });
 
   it('adds a floor pattern in the same shape Dungeondraft writes (format 3)', () => {

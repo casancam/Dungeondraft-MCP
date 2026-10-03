@@ -358,18 +358,133 @@ export function setEnvironment(ed: MapEditor, levelRef: string | number | undefi
 
 // ---------- terrain ----------
 
+/** One brush stroke: exactly one of area / circle / line. */
+export interface TerrainStroke {
+  slot: number;
+  area?: GridRect;
+  circle?: { center: Vec2; radius: number };
+  /** A stroke along a polyline, `width` squares wide (roads, trails, riverbanks). */
+  line?: { points: Vec2[]; width: number };
+  /** Soft edge: weight fades from 1 to 0 over this many squares outside the shape (default 0 = hard). */
+  feather?: number;
+  /** 0..1, how far existing terrain is blended towards the slot (default 1). */
+  strength?: number;
+}
+
 export interface TerrainInput {
   enabled?: boolean;
   /** Slot number (1-8) -> terrain texture. Slots 5-8 turn on Dungeondraft's "expand slots". */
   slots?: Record<string, string>;
   /** Paint the whole level with one slot. Applied before `paint`. */
   fill?: number;
-  paint?: { area: GridRect; slot: number }[];
+  paint?: TerrainStroke[];
   smooth_blending?: boolean;
 }
 
 /** Terrain splat: RGBA bytes, 4x4 texels per square, row-major; channel = weight of slot 1..4 (splat2: 5..8). */
 export const SPLAT_PER_SQUARE = 4;
+
+function segmentDistance(p: Vec2, a: Vec2, b: Vec2): number {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const l2 = dx * dx + dy * dy;
+  const t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0;
+  return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+}
+
+/** Distance (squares) from a point to the stroke's shape; <= 0 means inside. */
+function strokeDistance(s: TerrainStroke, p: Vec2): number {
+  if (s.area) {
+    const a = s.area;
+    const dx = Math.max(a.x - p[0], 0, p[0] - (a.x + a.width));
+    const dy = Math.max(a.y - p[1], 0, p[1] - (a.y + a.height));
+    return Math.hypot(dx, dy);
+  }
+  if (s.circle) return Math.hypot(p[0] - s.circle.center[0], p[1] - s.circle.center[1]) - s.circle.radius;
+  const { points, width } = s.line!;
+  let d = Infinity;
+  for (let i = 0; i + 1 < points.length; i++) d = Math.min(d, segmentDistance(p, points[i], points[i + 1]));
+  return d - width / 2;
+}
+
+function strokeBounds(s: TerrainStroke): GridRect {
+  const f = s.feather ?? 0;
+  if (s.area) return { x: s.area.x - f, y: s.area.y - f, width: s.area.width + 2 * f, height: s.area.height + 2 * f };
+  if (s.circle) {
+    const r = s.circle.radius + f;
+    return { x: s.circle.center[0] - r, y: s.circle.center[1] - r, width: 2 * r, height: 2 * r };
+  }
+  const { points, width } = s.line!;
+  const pad = width / 2 + f;
+  const xs = points.map((q) => q[0]);
+  const ys = points.map((q) => q[1]);
+  return { x: Math.min(...xs) - pad, y: Math.min(...ys) - pad, width: Math.max(...xs) - Math.min(...xs) + 2 * pad, height: Math.max(...ys) - Math.min(...ys) + 2 * pad };
+}
+
+function describeStroke(s: TerrainStroke): string {
+  if (s.area) return `${s.area.width}x${s.area.height} area at (${s.area.x},${s.area.y})`;
+  if (s.circle) return `circle r=${s.circle.radius} at (${s.circle.center})`;
+  return `${s.line!.width}-wide line through ${s.line!.points.length} points`;
+}
+
+/**
+ * Blend texels towards a one-hot weight for `slot`. Weight per texel = strength inside the shape,
+ * smoothly falling to 0 across `feather`. A hard full-strength stroke writes exact one-hot values.
+ */
+export function paintStroke(splat: Uint8Array, splat2: Uint8Array | null, w: number, h: number, s: TerrainStroke): number {
+  const shapes = [s.area, s.circle, s.line].filter(Boolean).length;
+  if (shapes !== 1) throw new Error('Each terrain stroke needs exactly one of area, circle or line.');
+  if (!Number.isInteger(s.slot) || s.slot < 1 || s.slot > 8) throw new Error(`Terrain slot must be 1-8, got ${s.slot}.`);
+  if (s.slot > 4 && !splat2) throw new Error('Slots 5-8 need splat2.');
+  if (s.line && s.line.points.length < 2) throw new Error('A terrain line needs at least 2 points.');
+  const feather = Math.max(0, s.feather ?? 0);
+  const strength = Math.max(0, Math.min(1, s.strength ?? 1));
+  const b = strokeBounds(s);
+  const x0 = Math.max(0, Math.floor(b.x * SPLAT_PER_SQUARE));
+  const y0 = Math.max(0, Math.floor(b.y * SPLAT_PER_SQUARE));
+  const x1 = Math.min(w, Math.ceil((b.x + b.width) * SPLAT_PER_SQUARE));
+  const y1 = Math.min(h, Math.ceil((b.y + b.height) * SPLAT_PER_SQUARE));
+  const channels = splat2 ? 8 : 4;
+  let texels = 0;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      // Texel centre in grid squares.
+      const d = strokeDistance(s, [(x + 0.5) / SPLAT_PER_SQUARE, (y + 0.5) / SPLAT_PER_SQUARE]);
+      let k: number;
+      if (d <= 1e-9) k = 1;
+      else if (feather > 0 && d < feather) {
+        const u = 1 - d / feather;
+        k = u * u * (3 - 2 * u); // smoothstep
+      } else continue;
+      k *= strength;
+      if (k <= 0) continue;
+      const i = (y * w + x) * 4;
+      const get = (c: number) => (c < 4 ? splat : splat2!)[i + (c % 4)];
+      const set = (c: number, v: number) => ((c < 4 ? splat : splat2!)[i + (c % 4)] = v);
+      if (k >= 1) {
+        for (let c = 0; c < channels; c++) set(c, c === s.slot - 1 ? 255 : 0);
+      } else {
+        // Blend in floats, then round with largest remainders so the texel's total weight is preserved.
+        const vals: number[] = [];
+        for (let c = 0; c < channels; c++) {
+          const cur = get(c);
+          vals.push(cur + ((c === s.slot - 1 ? 255 : 0) - cur) * k);
+        }
+        const floors = vals.map(Math.floor);
+        let left = Math.round(vals.reduce((a, v) => a + v, 0)) - floors.reduce((a, v) => a + v, 0);
+        const order = vals.map((v, c) => [v - floors[c], c] as const).sort((a, b) => b[0] - a[0]);
+        for (const [, c] of order) {
+          if (left <= 0) break;
+          floors[c]++;
+          left--;
+        }
+        floors.forEach((v, c) => set(c, Math.min(255, v)));
+      }
+      texels++;
+    }
+  }
+  return texels;
+}
 
 export function setTerrain(ed: MapEditor, levelRef: string | number | undefined, input: TerrainInput) {
   const [key, level] = ed.level(levelRef);
@@ -405,38 +520,18 @@ export function setTerrain(ed: MapEditor, levelRef: string | number | undefined,
     }
     if (splat2 && splat2.length !== w * h * 4) throw new Error(`Unexpected splat2 size ${splat2.length}; refusing to paint.`);
 
-    const paintRect = (x0: number, y0: number, x1: number, y1: number, slot: number) => {
-      if (!Number.isInteger(slot) || slot < 1 || slot > 8) throw new Error(`Terrain slot must be 1-8, got ${slot}.`);
-      let texels = 0;
-      for (let y = Math.max(0, y0); y < Math.min(h, y1); y++) {
-        for (let x = Math.max(0, x0); x < Math.min(w, x1); x++) {
-          const i = (y * w + x) * 4;
-          splat.fill(0, i, i + 4);
-          splat2?.fill(0, i, i + 4);
-          if (slot <= 4) splat[i + slot - 1] = 255;
-          else splat2![i + slot - 5] = 255;
-          texels++;
-        }
-      }
-      return texels;
-    };
-    if (input.fill !== undefined) {
-      paintRect(0, 0, w, h, input.fill);
-      changes.push(`filled level with slot ${input.fill}`);
-    }
-    const mapRect = { x: 0, y: 0, width: w / 4, height: h / 4 };
-    for (const p of input.paint ?? []) {
-      const a = p.area;
-      const n = paintRect(Math.round(a.x * 4), Math.round(a.y * 4), Math.round((a.x + a.width) * 4), Math.round((a.y + a.height) * 4), p.slot);
-      if (!n) ed.warnings.push(`Paint area (${a.x},${a.y} ${a.width}x${a.height}) is outside the map; nothing painted.`);
-      changes.push(`painted ${a.width}x${a.height} at (${a.x},${a.y}) with slot ${p.slot}`);
-    }
-    // Floor patterns draw over terrain: say so, or painted terrain silently "disappears".
-    for (const area of [...(input.fill !== undefined ? [mapRect] : []), ...(input.paint ?? []).map((p) => p.area)]) {
-      const covering = floorsOverlapping(level, area);
+    const mapRect: GridRect = { x: 0, y: 0, width: w / 4, height: h / 4 };
+    const strokes: TerrainStroke[] = [...(input.fill !== undefined ? [{ area: mapRect, slot: input.fill }] : []), ...(input.paint ?? [])];
+    for (const s of strokes) {
+      const n = paintStroke(splat, splat2, w, h, s);
+      const label = describeStroke(s);
+      if (!n) ed.warnings.push(`${label} is outside the map; nothing painted.`);
+      changes.push(s.area === mapRect ? `filled level with slot ${s.slot}` : `painted ${label} with slot ${s.slot}${s.feather ? `, feather ${s.feather}` : ''}${s.strength !== undefined && s.strength < 1 ? `, strength ${s.strength}` : ''}`);
+      // Floor patterns draw over terrain: say so, or painted terrain silently "disappears".
+      const covering = floorsOverlapping(level, strokeBounds(s));
       if (covering.length) {
         ed.warnings.push(
-          `Floor patterns cover ${area === mapRect ? 'parts of the level' : `the area at (${area.x},${area.y})`} and are drawn on top of terrain, so the terrain there is hidden: ${covering.join(', ')}. Remove them (remove-elements types ["patterns"]) if the terrain should show.`,
+          `Floor patterns cover ${s.area === mapRect ? 'parts of the level' : label} and are drawn on top of terrain, so the terrain there is hidden: ${covering.join(', ')}. Remove them (remove-elements types ["patterns"]) if the terrain should show.`,
         );
       }
     }

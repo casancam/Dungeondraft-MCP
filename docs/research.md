@@ -1,11 +1,13 @@
-# Dungeondraft MCP: research findings
+# Dungeondraft file formats: research notes
+
+Notes behind this server: how `.dungeondraft_map`, `.dd2vtt` and asset packs are structured, and how each claim was checked.
 
 Status legend:
 - **[VERIFIED]**: confirmed against real files in `test/fixtures/external/` or official source code/docs.
-- **[SOURCE]**: read in third-party source code or docs, not yet checked against a real file on this machine.
+- **[SOURCE]**: read in third-party source code or docs, not checked against a real file.
 - **[GUESS]**: inferred. Needs confirmation before code depends on it.
 
-Sample files (downloaded from public GitHub repos, used as test fixtures):
+Sample files used as test fixtures (the public ones are downloaded by `npm run fixtures`, not redistributed):
 
 | Fixture | Origin | DD build | `world.format` | Notes |
 |---|---|---|---|---|
@@ -13,10 +15,9 @@ Sample files (downloaded from public GitHub repos, used as test fixtures):
 | `ambush.dungeondraft_map` (+ `.dd2vtt`) | pleonr/dungeondraftMaps | 1.0.x | 3 | 20x20, 22 portals, 316 objects |
 | `corpse_flower.dungeondraft_map` | watermelonwolverine/dungeondraft_maps | — | 2 | tiny 8x8 |
 | `fort_on_hill.dungeondraft_map` | lordhaywire/dungeondraft-maps | 1.0.2.4 | 3 | 4 levels, 18 custom packs (Forgotten Adventures), 444 objects, 33 paths, texts, 14.6 MB |
+| `mcp_test.dungeondraft_map` (in repo) | made for this project | **1.2.0.1 opulent kirin** | 3 | 35×20, default assets only, 6 patterns, 1 object, terrain (sand/sandstone/cracked earth/snow) |
 
-| **`mcp_test.dungeondraft_map`** (yours, copied from `Documents\`) | your machine | **1.2.0.1 opulent kirin** | 3 | 35×20, default assets only, 6 patterns, 1 object, terrain (sand/sandstone/cracked earth/snow) |
-
-Your map **round-trips byte-identically** with the same printer. **[VERIFIED]** Remaining gap: no sample of yours uses custom packs, walls, doors or lights yet.
+All of them **round-trip byte-identically** with the printer in `src/godot/json.ts` **[VERIFIED]**. Edits made by this server (walls, doors, objects, paths, lights, terrain, floors, ambient light) were opened and checked in Dungeondraft 1.2.0.1.
 
 ---
 
@@ -126,32 +127,21 @@ image             base64 PNG (or WEBP) of the rendered map
 - **But mods run unsandboxed Godot 3 GDScript.** [brann-dev/dungeondraft-mcp](https://github.com/brann-dev/dungeondraft-mcp) (MIT, June 2026) opens a Godot `TCP_Server` on `127.0.0.1:8787` from a mod, polls it in `update()`, and reports: "raw TCP from the modding sandbox works … confirmed end-to-end on Godot 3.4.2."
 - **[thekannen/battlemap-mcp](https://github.com/thekannen/battlemap-mcp) (MIT, actively released: v1.1.1 on 2026-10-01)** is a polished version of the same idea for **Dungeondraft 1.2.0.1**: a mod plus a local companion, authenticated localhost messages, one-click Claude Code setup, asset browsing, building, screenshots/exports so the model can see its work, separate undo, and bundled map-making skills. Its known limitations include: it needs DD running with a map open, packs must be in the map's manifest, and the 16384 px export cap.
 
-**What this means for Phase 2:** the live bridge we'd build already exists and is maintained. I recommend **not** rebuilding it. Use battlemap-mcp for live building, and keep this project focused on what it doesn't do: offline/batch file editing, variants (day/night), and the **dd2vtt → Foundry** pipeline into your foundry-vtt-mcp. (Section 6 has the decision.)
+**What this means for this project:** a live bridge already exists and is maintained, so this server doesn't build one. It focuses on what a live bridge doesn't cover: offline and batch file editing, map variants (day/night), and the **dd2vtt → Foundry** pipeline.
 
 ## 4. Asset packs: storage and listing
 
 - **[VERIFIED]** on `Dungeondraft.pck` (Godot 3.4.2, 4,857 files); **[SOURCE]** for packs (Ryex/Dungeondraft-GoPackager). A `.dungeondraft_pack` is a **Godot 3 PCK** file: little-endian, magic `GDPC` (0x43504447), format version, Godot major/minor/patch, 16 reserved u32, file count, then per file `{u32 path_len, path, u64 offset, u64 size, md5[16]}`. Paths look like `res://packs/<ID>/...`. **Listing a pack only needs the index at the start of the file**, without decompressing or reading any images, which is fast and cheap.
 - **[SOURCE]** Inside a pack: `pack.json` (`name, id, version, author, keywords, allow_3rd_party_mapping_software_to_read, custom_color_overrides`), `textures/{objects,paths,walls,portals,tilesets,terrain,materials,patterns,lights}/...`, `data/default.dungeondraft_tags` (tag → asset lists, used for search), plus `data/walls/*.dungeondraft_wall` and `data/tilesets/*.dungeondraft_tileset`, and `thumbnails/`.
-- **Location:** packs live in the **"Asset Folder" chosen in Dungeondraft's settings**, not in a fixed location. **[GUESS]** DD's settings live under `%APPDATA%\Dungeondraft\`. I didn't scan your AppData or Program Files, so I need you to tell me the folder (see Questions).
+- **Location:** packs live in the **"Asset Folder" chosen in Dungeondraft's settings**, not in a fixed location, so the server takes it from `DD_ASSET_DIRS`. **[VERIFIED]** with synthetic packs in `test/packs.test.ts`: index listing, tags, validation, manifest entry.
 - **Built-in assets: [VERIFIED]** `C:\Program Files\Dungeondraft\Dungeondraft.pck` lists them as `res://textures/<category>/<name>.png.import` entries: 1,792 objects, 44 paths, 39 portals, 20 walls (plus `_end` caps), 13 terrain, 24 tilesets, 25 materials, 3 lights. `res://data/default.dungeondraft_tags` is plain JSON `{tags: {Tag: [paths]}, sets: {Set: [tags]}}` with 81 tags and 15 sets. The server reads only the index and this tags file.
-- **Licensing flag:** `pack.json` has `allow_3rd_party_mapping_software_to_read`, and your likely packs (Forgotten Adventures) set it to **false**. Reading a pack's *file index* (names only) to validate references is a grey area. Extracting images is clearly not OK. I propose: list and validate names from the index, never extract image data, and add a config switch to skip packs that set the flag to `false`.
+- **Licensing flag:** `pack.json` has `allow_3rd_party_mapping_software_to_read`, and some commercial packs (e.g. Forgotten Adventures, per the fixture's manifest) set it to **false**. The server never reads image data from any pack. For packs that set the flag to `false` it reads only `pack.json` (needed for the map's asset manifest) and does not list or index their contents.
 
 ## 5. Foundry side (for `dd2vtt-to-foundry-scene`)
 - Foundry v13 core has no built-in UVTT import. The community modules are "Universal Battlemap Importer" and [moo-man/FVTT-DD-Import](https://github.com/moo-man/FVTT-DD-Import). Conversion basics: wall segment = `c: [x1,y1,x2,y2]` in scene pixels (squares × `pixels_per_grid` + scene padding offset); door = wall with `door: 1`, `ds: 0/1` (closed/open); light → AmbientLight `{x, y, config: {dim, bright, color, alpha}}` where `dim`/`bright` are in grid units.
-- **[TODO, Phase 1]** Read `Desktop\code\foundry-vtt-mcp` to copy its exact v13 scene/wall/light shapes. I haven't touched that repo yet, per your instruction to set those changes aside.
+- The output follows the `Scene.create()` payload shape used by foundry-vtt-mcp, with `walls` and `lights` filled in. See `docs/foundry-import.md`.
 
-## 6. Scope (approved 2026-10-03; Phase 1 is built, see README)
-
-**Phase 1 (file-based, TypeScript, `@modelcontextprotocol/sdk`, stdio, Node at `C:\Program Files\nodejs`)**
-- Core: order-preserving Godot-JSON parser and printer (byte-identical round-trip, tested on the 4 fixtures), a `var2str` codec (Vector2 and Pool* types), and node-id allocation.
-- Tools: `list-maps`, `inspect-map`, `list-assets` (PCK index reader plus tags), `add-objects`, `add-walls` (with doors), `add-lights`, `add-paths`, `set-terrain` (splat painting by grid rect), `remove-elements`, `duplicate-map`, `dd2vtt-to-foundry-scene`, and `export-dd2vtt` as the hybrid (b) above, with a clear note that the image must come from DD.
-- Safety: an allow-listed root folder (configured via env/args), `.bak-<timestamp>` before every write, re-parse after every save with element-count and untouched-field checks, and a write to a temp file followed by an atomic rename.
-- Tests: vitest on the fixtures plus at least one of your maps.
-
-**Phase 2 (live):** I recommend using battlemap-mcp instead of building a bridge. If you still want our own, the design would mirror brann-dev's: a GDScript mod with `TCP_Server` and newline-delimited JSON, plus a Node client.
-
-## Questions for you
-1. ~~Sample map~~: done (`mcp_test`, DD 1.2.0.1). Nice to have: put a wall with a door and a light in it, and export a `.dd2vtt` of it, to test the Foundry conversion against real output.
-2. Your **asset folder path** (Dungeondraft → Settings / Assets), if you use custom packs.
-3. **Phase 2:** OK to skip building a live bridge and point you at battlemap-mcp for live building?
-4. **Which folders may the server write to?** The prompt mentions `Desktop\Amonkhet\`, but you asked me to set that aside. Should I use a dedicated maps folder instead?
+## 6. Not covered (yet)
+- Editing water, caves, painted materials, roofs and text (preserved as-is).
+- `objects_line_of_sight` in `export-dd2vtt` (no Dungeondraft 1.2 `.dd2vtt` sample to check against).
+- macOS/Linux install paths for the built-in asset index are unverified; set `DUNGEONDRAFT_DIR`.

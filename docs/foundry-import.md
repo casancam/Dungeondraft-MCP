@@ -1,6 +1,6 @@
-# A future `import-dd2vtt` tool in foundry-vtt-mcp
+# Importing into Foundry: notes for a live import tool
 
-`dd2vtt-to-foundry-scene` (this repo, `src/vtt/foundry.ts`) already produces the scene data. A native tool in `Desktop\code\foundry-vtt-mcp` would let Claude go from a `.dd2vtt` to a live Foundry scene in one step. Here's what it needs.
+`dd2vtt-to-foundry-scene` (`src/vtt/foundry.ts`) produces Foundry v13 scene data that you import by hand ("Import Data"). A live import, from `.dd2vtt` straight to a scene in a running Foundry, needs code running *inside* Foundry. That means a Foundry module, for example in an MCP server that already has one, such as [foundry-vtt-mcp](https://github.com/adambdooley/foundry-vtt-mcp). These notes describe what such a tool would need.
 
 ## Where it fits in foundry-vtt-mcp
 

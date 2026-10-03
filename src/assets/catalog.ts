@@ -129,7 +129,9 @@ export class AssetCatalog {
   private loadPackDir(dir: string) {
     let files: string[] = [];
     try {
-      files = walk(dir, 2).filter((f) => f.toLowerCase().endsWith('.dungeondraft_pack'));
+      files = walk(dir, 2)
+        .filter((f) => f.toLowerCase().endsWith('.dungeondraft_pack'))
+        .sort((a, b) => path.basename(a).localeCompare(path.basename(b)));
     } catch (e) {
       this.status.packErrors.push(`Cannot read asset folder ${dir}: ${(e as Error).message}`);
       return;
