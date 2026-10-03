@@ -74,7 +74,7 @@ On Windows, if Node isn't on your PATH, use the full path, e.g. `"command": "C:\
 ### From source
 
 ```sh
-git clone <this repo> && cd dungeondraft-mcp
+git clone https://github.com/casancam/Dungeondraft-MCP.git && cd Dungeondraft-MCP
 npm install && npm run build
 claude mcp add dungeondraft -s user -e DD_MCP_ROOTS="/path/to/maps" -- node "$PWD/dist/index.js"
 ```

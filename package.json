@@ -16,6 +16,14 @@
   ],
   "author": "Carlos Sanchez",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/casancam/Dungeondraft-MCP.git"
+  },
+  "homepage": "https://github.com/casancam/Dungeondraft-MCP#readme",
+  "bugs": {
+    "url": "https://github.com/casancam/Dungeondraft-MCP/issues"
+  },
   "type": "module",
   "bin": {
     "dungeondraft-mcp": "dist/index.js"
