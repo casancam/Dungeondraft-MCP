@@ -1,0 +1,43 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.casancam/dungeondraft-mcp",
+  "description": "Read, edit and export Dungeondraft maps; convert Universal VTT (.dd2vtt) into Foundry VTT scenes",
+  "repository": {
+    "url": "https://github.com/casancam/Dungeondraft-MCP",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "dungeondraft-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "DD_MCP_ROOTS",
+          "description": "Folders the server may read and write maps in, separated by ;. Default: your Documents folder",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "DUNGEONDRAFT_DIR",
+          "description": "Dungeondraft install folder (contains Dungeondraft.pck), for built-in asset search. Auto-detected on Windows",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "DD_ASSET_DIRS",
+          "description": "Dungeondraft asset folders with .dungeondraft_pack files, separated by ;",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

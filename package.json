@@ -1,6 +1,7 @@
 {
   "name": "dungeondraft-mcp",
   "version": "0.1.0",
+  "mcpName": "io.github.casancam/dungeondraft-mcp",
   "description": "MCP server for Dungeondraft: read, edit and export .dungeondraft_map files, and convert Universal VTT (.dd2vtt) exports into Foundry VTT scenes",
   "keywords": [
     "mcp",
