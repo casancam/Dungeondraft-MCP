@@ -1,0 +1,6 @@
+node_modules/
+dist/
+# Third-party sample maps, downloaded by `npm run fixtures`
+test/fixtures/external/
+*.bak-*
+*.tmp-*

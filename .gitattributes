@@ -1,0 +1,6 @@
+* text=auto eol=lf
+# Map files must stay byte-exact (round-trip tests compare bytes)
+*.dungeondraft_map -text
+*.dd2vtt -text
+*.png binary
+*.webp binary
